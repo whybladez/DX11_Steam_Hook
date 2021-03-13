@@ -1,4 +1,4 @@
-﻿#define _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
 
 #include "Common.hpp"
 #include "MinHook/include/MinHook.h"
@@ -21,6 +21,7 @@ LRESULT CALLBACK hooked_wndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 		switch (wParam)
 		{
 			case VK_INSERT: g_bDrawMenu = !g_bDrawMenu;
+			
 		}
 	}
 
@@ -80,15 +81,18 @@ BOOL APIENTRY DllMain(HMODULE hmod, DWORD reason, PVOID)
 		DisableThreadLibraryCalls(hmod);
 
 		g_hModule = hmod;
-		g_MainThread = CreateThread(nullptr, 0, [](PVOID) -> DWORD
+		std::thread mainThread([&]
 		{
+			AllocConsole();
+			freopen("CONOUT$", "w", stdout);
+
 			const auto renderer_handle = reinterpret_cast<uintptr_t>(GetModuleHandleA("GameOverlayRenderer64.dll"));
 			const auto function_to_hook = renderer_handle + 0x8CF40;
 			
 			if (MH_Initialize() != MH_OK)
 			{
 				printf("Failed to initialize MinHook");
-				return FALSE;
+				return;
 			}
 
 			MH_STATUS hookStatus = MH_CreateHook(reinterpret_cast<LPVOID>(function_to_hook), &hooked_d3d11_present, reinterpret_cast<LPVOID*>(&o_d3d11_present));
@@ -96,40 +100,41 @@ BOOL APIENTRY DllMain(HMODULE hmod, DWORD reason, PVOID)
 			if (hookStatus != MH_OK)
 			{
 				printf("Failed to create hook for D3D11Present : %s", MH_StatusToString(hookStatus));
-				return FALSE;
+				return;
 			}
-
+		
 			hookStatus = MH_EnableHook(reinterpret_cast<LPVOID>(function_to_hook));
 			if (hookStatus != MH_OK)
 			{
 				printf("Failed to enable hook for D3D11Present : %s", MH_StatusToString(hookStatus));
-				return FALSE;
+				return;
 			}
 
 			while (!GetAsyncKeyState(VK_NUMPAD0))
 				Sleep(100);
 
+
 			ImGui_ImplDX11_Shutdown();
 			ImGui_ImplWin32_Shutdown();
-			ImGui::DestroyContext();
 
 			SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)o_wndProc);
 
-			if (MH_DisableHook(reinterpret_cast<LPVOID>(function_to_hook)) != MH_OK)
+			if (MH_RemoveHook(reinterpret_cast<LPVOID>(function_to_hook)) != MH_OK)
 			{
-				printf("Failed to disable hook for D3D11Present");
-				return FALSE;
+				printf("Failed to remove hook for D3D11Present");
+				return;
 			}
 
 			if (MH_Uninitialize() != MH_OK)
 			{
 				printf("Failed to uninitialize MinHook");
-				return FALSE;
+				return;
 			}
 
-			CloseHandle(g_MainThread);
-			FreeLibraryAndExitThread(g_hModule, 0);
-		}, nullptr, 0, &g_MainThreadId);
+			FreeLibrary(g_hModule);
+		});
+
+		mainThread.detach();
 	}
 
 	return true;
